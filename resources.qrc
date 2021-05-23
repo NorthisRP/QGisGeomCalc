@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/geom_calc" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
