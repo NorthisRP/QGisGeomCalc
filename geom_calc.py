@@ -25,7 +25,7 @@ from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QVari
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 import qgis
-from qgis.core import QgsField, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
+from qgis.core import QgsField, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, edit
 # Initialize Qt resources from file resources.py
 from .resources import *
 
@@ -240,6 +240,7 @@ class GeomCalculator:
 
             def calculate():
                 #выбранный слой
+                curLayers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
                 sLayerIndex = self.dockwidget.comboBox.currentIndex()
                 selectedLayer = curLayers[sLayerIndex]
                 #добавляем атрибуты в таблицу если их нет
@@ -257,11 +258,12 @@ class GeomCalculator:
                 context.appendScopes(
                     QgsExpressionContextUtils.globalProjectLayerScopes(selectedLayer))
                 #загружаем значения выражений для атрибутов
-                
-                for f in selectedLayer.getFeatures():
-                    context.setFeature(f)
-                    f['Area'] = area.evaluate(context)
-                    f['Perimeter'] = per.evaluate(context)
-                    selectedLayer.updateFeature(f)
+                with edit(selectedLayer):
+                    for f in selectedLayer.getFeatures():
+                        context.setFeature(f)
+                        f['Area'] = area.evaluate(context)
+                        selectedLayer.updateFeature(f)
+                        f['Perimeter'] = per.evaluate(context)
+                        selectedLayer.updateFeature(f)
 
             self.dockwidget.pushButton.clicked.connect(calculate)
