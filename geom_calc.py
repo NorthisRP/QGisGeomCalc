@@ -25,7 +25,7 @@ from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QVari
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 import qgis
-from qgis.core import QgsField, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, edit
+from qgis.core import QgsField, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, edit, QgsProject
 # Initialize Qt resources from file resources.py
 from .resources import *
 
@@ -253,27 +253,37 @@ class GeomCalculator:
                     res = selectedLayer.dataProvider().addAttributes([QgsField('Area', QVariant.Double), \
                                                                     QgsField('Perimeter', QVariant.Double),\
                                                                     QgsField('fCompact', QVariant.Double),\
-                                                                    # QgsField('iCompactness', QVariant.Double),\
+                                                                    QgsField('iCompact', QVariant.Double),\
                                                                     ])
                     selectedLayer.updateFields()
                 #составляем выражения для атрибутов
-                area = QgsExpression('$area * 1e2')
-                per = QgsExpression('$perimeter')
-                fComp = QgsExpression('$perimeter/(4*sqrt($area))')
-                # iComp = QgsExpression('')
-
                 context = QgsExpressionContext()
                 context.appendScopes(
                     QgsExpressionContextUtils.globalProjectLayerScopes(selectedLayer))
+
+                area = QgsExpression('$area * 1e2')
+                per = QgsExpression('$perimeter')
+                fComp = QgsExpression('$perimeter/(4*sqrt($area))')
+                iComp = QgsExpression('$area / area(bounds( $geometry))')
+   
                 #загружаем значения выражений для атрибутов
+                
+                # selectedLayer.startEditing()
+                # for f in selectedLayer.getFeatures():
+                #     context.setFeature(f)
+                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('Area'), area.evaluate(context))
+                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('Perimeter'), per.evaluate(context))
+                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('fCompact'), fComp.evaluate(context))
+                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('iCompact'), iComp.evaluate(context))
+                # selectedLayer.commitChanges()
+
                 with edit(selectedLayer):
                     for f in selectedLayer.getFeatures():
                         context.setFeature(f)
                         f['Area'] = area.evaluate(context)
                         f['Perimeter'] = per.evaluate(context)
                         f['fCompact'] = fComp.evaluate(context)
-                        # f['iCompact'] = fComp.evaluate(context)
+                        f['iCompact'] = iComp.evaluate(context)
                         selectedLayer.updateFeature(f)
-
             self.dockwidget.pushButton.clicked.connect(calculate)
             self.dockwidget.check.clicked.connect(checkLayers)
