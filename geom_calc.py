@@ -232,27 +232,35 @@ class GeomCalculator:
             self.iface.addDockWidget(Qt.LeftDockWidgetArea, self.dockwidget)
             self.dockwidget.show()
             #загрузим все слои в выпадающий список
-            curLayers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
-            layerNames = []
-            for cL in curLayers:
-                layerNames.append(cL.name())
-            self.dockwidget.comboBox.addItems(layerNames)
+            def checkLayers():
+                self.dockwidget.comboBox.clear()
+                curLayers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
+                layerNames = []
+                for cL in curLayers:
+                    layerNames.append(cL.name())
+                self.dockwidget.comboBox.addItems(layerNames)
+            checkLayers()
 
             def calculate():
                 #выбранный слой
                 curLayers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
+                if not curLayers: return
                 sLayerIndex = self.dockwidget.comboBox.currentIndex()
                 selectedLayer = curLayers[sLayerIndex]
                 #добавляем атрибуты в таблицу если их нет
                 atrrs = selectedLayer.dataProvider().fields().names()
-                if 'Area' not in atrrs and 'Perimeter' not in atrrs:
+                if 'Area' not in atrrs and 'Perimeter' not in atrrs and 'fCompact' not in atrrs and 'iCompact' not in atrrs:
                     res = selectedLayer.dataProvider().addAttributes([QgsField('Area', QVariant.Double), \
-                                                                    QgsField('Perimeter', QVariant.Double)\
+                                                                    QgsField('Perimeter', QVariant.Double),\
+                                                                    QgsField('fCompact', QVariant.Double),\
+                                                                    # QgsField('iCompactness', QVariant.Double),\
                                                                     ])
                     selectedLayer.updateFields()
                 #составляем выражения для атрибутов
                 area = QgsExpression('$area * 1e2')
                 per = QgsExpression('$perimeter')
+                fComp = QgsExpression('$perimeter/(4*sqrt($area))')
+                # iComp = QgsExpression('')
 
                 context = QgsExpressionContext()
                 context.appendScopes(
@@ -262,8 +270,10 @@ class GeomCalculator:
                     for f in selectedLayer.getFeatures():
                         context.setFeature(f)
                         f['Area'] = area.evaluate(context)
-                        selectedLayer.updateFeature(f)
                         f['Perimeter'] = per.evaluate(context)
+                        f['fCompact'] = fComp.evaluate(context)
+                        # f['iCompact'] = fComp.evaluate(context)
                         selectedLayer.updateFeature(f)
 
             self.dockwidget.pushButton.clicked.connect(calculate)
+            self.dockwidget.check.clicked.connect(checkLayers)
