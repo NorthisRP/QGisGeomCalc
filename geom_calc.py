@@ -21,11 +21,13 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QVariant 
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QVariant
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 import qgis
-from qgis.core import QgsField, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, edit, QgsProject
+from qgis.core import QgsField, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, edit, QgsProject, Qgis, \
+    QgsProcessingFeatureSourceDefinition, QgsVectorLayer
+import processing
 # Initialize Qt resources from file resources.py
 from .resources import *
 
@@ -70,11 +72,10 @@ class GeomCalculator:
         self.toolbar = self.iface.addToolBar(u'GeomCalculator')
         self.toolbar.setObjectName(u'GeomCalculator')
 
-        #print "** INITIALIZING GeomCalculator"
+        # print "** INITIALIZING GeomCalculator"
 
         self.pluginIsActive = False
         self.dockwidget = None
-
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -91,18 +92,17 @@ class GeomCalculator:
         # noinspection PyTypeChecker,PyArgumentList,PyCallByClass
         return QCoreApplication.translate('GeomCalculator', message)
 
-
     def add_action(
-        self,
-        icon_path,
-        text,
-        callback,
-        enabled_flag=True,
-        add_to_menu=True,
-        add_to_toolbar=True,
-        status_tip=None,
-        whats_this=None,
-        parent=None):
+            self,
+            icon_path,
+            text,
+            callback,
+            enabled_flag=True,
+            add_to_menu=True,
+            add_to_toolbar=True,
+            status_tip=None,
+            whats_this=None,
+            parent=None):
         """Add a toolbar icon to the toolbar.
 
         :param icon_path: Path to the icon for this action. Can be a resource
@@ -165,7 +165,6 @@ class GeomCalculator:
 
         return action
 
-
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
 
@@ -176,7 +175,7 @@ class GeomCalculator:
             callback=self.run,
             parent=self.iface.mainWindow())
 
-    #--------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
 
     def onClosePlugin(self):
         """Cleanup necessary items here when plugin dockwidget is closed"""
@@ -193,11 +192,10 @@ class GeomCalculator:
 
         self.pluginIsActive = False
 
-
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
 
-        #print "** UNLOAD GeomCalculator"
+        # print "** UNLOAD GeomCalculator"
 
         for action in self.actions:
             self.iface.removePluginMenu(
@@ -207,7 +205,7 @@ class GeomCalculator:
         # remove the toolbar
         del self.toolbar
 
-    #--------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
 
     def run(self):
         """Run method that loads and starts the plugin"""
@@ -215,7 +213,7 @@ class GeomCalculator:
         if not self.pluginIsActive:
             self.pluginIsActive = True
 
-            #print "** STARTING GeomCalculator"
+            # print "** STARTING GeomCalculator"
 
             # dockwidget may not exist if:
             #    first run of plugin
@@ -231,59 +229,112 @@ class GeomCalculator:
             # TODO: fix to allow choice of dock location
             self.iface.addDockWidget(Qt.LeftDockWidgetArea, self.dockwidget)
             self.dockwidget.show()
-            #загрузим все слои в выпадающий список
-            def checkLayers():
-                self.dockwidget.comboBox.clear()
-                curLayers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
-                layerNames = []
-                for cL in curLayers:
-                    layerNames.append(cL.name())
-                self.dockwidget.comboBox.addItems(layerNames)
-            checkLayers()
 
-            def calculate():
-                #выбранный слой
-                curLayers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
-                if not curLayers: return
-                sLayerIndex = self.dockwidget.comboBox.currentIndex()
-                selectedLayer = curLayers[sLayerIndex]
-                #добавляем атрибуты в таблицу если их нет
-                atrrs = selectedLayer.dataProvider().fields().names()
-                if 'Area' not in atrrs and 'Perimeter' not in atrrs and 'fCompact' not in atrrs and 'iCompact' not in atrrs:
-                    res = selectedLayer.dataProvider().addAttributes([QgsField('Area', QVariant.Double), \
-                                                                    QgsField('Perimeter', QVariant.Double),\
-                                                                    QgsField('fCompact', QVariant.Double),\
-                                                                    QgsField('iCompact', QVariant.Double),\
-                                                                    ])
-                    selectedLayer.updateFields()
-                #составляем выражения для атрибутов
+            # загрузим все слои в выпадающий список
+            def check_layers():
+                self.dockwidget.plots.clear()
+                self.dockwidget.streets.clear()
+                cur_layers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
+                layer_names = []
+                for cL in cur_layers:
+                    layer_names.append(cL.name())
+                self.dockwidget.plots.addItems(layer_names)
+                self.dockwidget.streets.addItems(layer_names)
+
+            check_layers()
+
+            def do_lines_layer(selected_layer):
+                fix_layer = processing.run("native:fixgeometries", {'INPUT': selected_layer, 'OUTPUT': 'memory:'})[
+                    'OUTPUT']
+                ll = processing.run("native:polygonstolines", {'INPUT': fix_layer, 'OUTPUT': 'memory:'})['OUTPUT']
+                e_lines = processing.run("native:explodelines", {'INPUT': ll, 'OUTPUT': 'memory:'})['OUTPUT']
+                e_lines.setName('Exploded')
+                QgsProject.instance().addMapLayer(e_lines)
+                # добавим новый атрибут
+                e_lines.dataProvider().addAttributes([QgsField('width', QVariant.Double)])
+                e_lines.updateFields()
+                # составляем выражения для атрибутов
                 context = QgsExpressionContext()
                 context.appendScopes(
-                    QgsExpressionContextUtils.globalProjectLayerScopes(selectedLayer))
+                    QgsExpressionContextUtils.globalProjectLayerScopes(e_lines))
+                length = QgsExpression('$length')
+                with edit(e_lines):
+                    for f in e_lines.getFeatures():
+                        context.setFeature(f)
+                        f['width'] = length.evaluate(context)
+                        e_lines.updateFeature(f)
+                return e_lines
 
-                area = QgsExpression('$area * 1e2')
+            def calculate():
+                # выбранный слой
+                cur_layers = qgis.core.QgsProject.instance().layerTreeRoot().layerOrder()
+                if not cur_layers:
+                    return
+                street_index = self.dockwidget.streets.currentIndex()
+                streets = cur_layers[street_index]
+                plot_index = self.dockwidget.plots.currentIndex()
+                plots = cur_layers[plot_index]
+                # сделаем новый слой линий и добавим в проект
+                exploded = do_lines_layer(plots)
+                # буферизируем слой улиц
+                buffered = processing.run("native:buffer", {'INPUT': streets,
+                                                            'DISTANCE': 30.0,
+                                                            'SEGMENTS': 5,
+                                                            'DISSOLVE': False,
+                                                            'END_CAP_STYLE': 0,
+                                                            'JOIN_STYLE': 0,
+                                                            'MITER_LIMIT': 2,
+                                                            'OUTPUT': 'memory:'})['OUTPUT']
+                # выделим объекты и найдем центроиды
+                processing.run("native:selectbylocation",
+                               {'INPUT': exploded, 'PREDICATE': 6, 'INTERSECT': buffered, 'METHOD': 0})
+                centroids = processing.run("native:centroids", {
+                    'INPUT': QgsProcessingFeatureSourceDefinition(exploded.id(), selectedFeaturesOnly=True),
+                    'ALL_PARTS': False, 'OUTPUT': 'memory:'})['OUTPUT']
+                # selected_layer - streets
+                snapped = processing.run("saga:snappointstolines",
+                                         {'INPUT': centroids, 'SNAP': streets, 'OUTPUT': 'TEMPORARY_OUTPUT',
+                                          'DISTANCE': 30})['OUTPUT']
+                snapped_l = QgsVectorLayer(snapped, 'snapped')
+                front = processing.run("qgis:distancetonearesthubpoints",
+                                       {'INPUT': centroids, 'HUBS': snapped_l, 'OUTPUT': 'memory:', 'FIELD': 'Name',
+                                        'UNIT': 0})['OUTPUT']
+                front.setName('Front')
+                QgsProject.instance().addMapLayer(front)
+                QgsProject.instance().removeMapLayer(exploded)
+
+                # добавляем атрибуты в таблицу если их нет
+                attrs = plots.dataProvider().fields().names()
+                if 'Area' not in attrs:
+                    plots.dataProvider().addAttributes([QgsField('Area', QVariant.Double)])
+                if 'Perimeter' not in attrs:
+                    plots.dataProvider().addAttributes([QgsField('Perimeter', QVariant.Double)])
+                if 'fCompact' not in attrs:
+                    plots.dataProvider().addAttributes([QgsField('fCompact', QVariant.Double)])
+                if 'iCompact' not in attrs:
+                    plots.dataProvider().addAttributes([QgsField('iCompact', QVariant.Double)])
+                plots.updateFields()
+                # составляем выражения для атрибутов
+                context = QgsExpressionContext()
+                context.appendScopes(
+                    QgsExpressionContextUtils.globalProjectLayerScopes(plots))
+                area = QgsExpression('$area')
                 per = QgsExpression('$perimeter')
-                fComp = QgsExpression('$perimeter/(4*sqrt($area))')
-                iComp = QgsExpression('$area / area(bounds( $geometry))')
-   
-                #загружаем значения выражений для атрибутов
-                
-                # selectedLayer.startEditing()
-                # for f in selectedLayer.getFeatures():
-                #     context.setFeature(f)
-                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('Area'), area.evaluate(context))
-                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('Perimeter'), per.evaluate(context))
-                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('fCompact'), fComp.evaluate(context))
-                #     selectedLayer.changeAttributeValue(f.id(), atrrs.index('iCompact'), iComp.evaluate(context))
-                # selectedLayer.commitChanges()
+                f_comp = QgsExpression('$perimeter/(4*sqrt($area))')
+                i_comp = QgsExpression('$area / area(bounds( $geometry))')
 
-                with edit(selectedLayer):
-                    for f in selectedLayer.getFeatures():
+                # загружаем значения выражений для атрибутов
+                with edit(plots):
+                    for f in plots.getFeatures():
                         context.setFeature(f)
                         f['Area'] = area.evaluate(context)
                         f['Perimeter'] = per.evaluate(context)
-                        f['fCompact'] = fComp.evaluate(context)
-                        f['iCompact'] = iComp.evaluate(context)
-                        selectedLayer.updateFeature(f)
+                        f['fCompact'] = f_comp.evaluate(context)
+                        f['iCompact'] = i_comp.evaluate(context)
+                        plots.updateFeature(f)
+
+                self.iface.messageBar().pushMessage("Success", "Geometries successfully calculated, go to attrs",
+                                                    level=Qgis.Success)
+
             self.dockwidget.pushButton.clicked.connect(calculate)
-            self.dockwidget.check.clicked.connect(checkLayers)
+            self.dockwidget.check.clicked.connect(check_layers)
