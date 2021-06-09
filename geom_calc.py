@@ -179,7 +179,6 @@ class GeomCalculator:
 
     def onClosePlugin(self):
         """Cleanup necessary items here when plugin dockwidget is closed"""
-        self.dockwidget.comboBox.clear()
 
         # disconnects
         self.dockwidget.closingPlugin.disconnect(self.onClosePlugin)
@@ -248,7 +247,6 @@ class GeomCalculator:
                     'OUTPUT']
                 ll = processing.run("native:polygonstolines", {'INPUT': fix_layer, 'OUTPUT': 'memory:'})['OUTPUT']
                 e_lines = processing.run("native:explodelines", {'INPUT': ll, 'OUTPUT': 'memory:'})['OUTPUT']
-                e_lines.setName('Exploded')
                 QgsProject.instance().addMapLayer(e_lines)
                 # добавим новый атрибут
                 e_lines.dataProvider().addAttributes([QgsField('width', QVariant.Double)])
@@ -274,34 +272,6 @@ class GeomCalculator:
                 streets = cur_layers[street_index]
                 plot_index = self.dockwidget.plots.currentIndex()
                 plots = cur_layers[plot_index]
-                # сделаем новый слой линий и добавим в проект
-                exploded = do_lines_layer(plots)
-                # буферизируем слой улиц
-                buffered = processing.run("native:buffer", {'INPUT': streets,
-                                                            'DISTANCE': 30.0,
-                                                            'SEGMENTS': 5,
-                                                            'DISSOLVE': False,
-                                                            'END_CAP_STYLE': 0,
-                                                            'JOIN_STYLE': 0,
-                                                            'MITER_LIMIT': 2,
-                                                            'OUTPUT': 'memory:'})['OUTPUT']
-                # выделим объекты и найдем центроиды
-                processing.run("native:selectbylocation",
-                               {'INPUT': exploded, 'PREDICATE': 6, 'INTERSECT': buffered, 'METHOD': 0})
-                centroids = processing.run("native:centroids", {
-                    'INPUT': QgsProcessingFeatureSourceDefinition(exploded.id(), selectedFeaturesOnly=True),
-                    'ALL_PARTS': False, 'OUTPUT': 'memory:'})['OUTPUT']
-                # selected_layer - streets
-                snapped = processing.run("saga:snappointstolines",
-                                         {'INPUT': centroids, 'SNAP': streets, 'OUTPUT': 'TEMPORARY_OUTPUT',
-                                          'DISTANCE': 30})['OUTPUT']
-                snapped_l = QgsVectorLayer(snapped, 'snapped')
-                front = processing.run("qgis:distancetonearesthubpoints",
-                                       {'INPUT': centroids, 'HUBS': snapped_l, 'OUTPUT': 'memory:', 'FIELD': 'Name',
-                                        'UNIT': 0})['OUTPUT']
-                front.setName('Front')
-                QgsProject.instance().addMapLayer(front)
-                QgsProject.instance().removeMapLayer(exploded)
 
                 # добавляем атрибуты в таблицу если их нет
                 attrs = plots.dataProvider().fields().names()
@@ -333,7 +303,55 @@ class GeomCalculator:
                         f['iCompact'] = i_comp.evaluate(context)
                         plots.updateFeature(f)
 
-                self.iface.messageBar().pushMessage("Success", "Geometries successfully calculated, go to attrs",
+                # сделаем новый слой линий и добавим в проект
+                exploded = do_lines_layer(plots)
+                # буферизируем слой улиц
+                buffered = processing.run("native:buffer", {'INPUT': streets,
+                                                            'DISTANCE': 30.0,
+                                                            'SEGMENTS': 5,
+                                                            'DISSOLVE': False,
+                                                            'END_CAP_STYLE': 0,
+                                                            'JOIN_STYLE': 0,
+                                                            'MITER_LIMIT': 2,
+                                                            'OUTPUT': 'memory:'})['OUTPUT']
+                # выделим объекты и найдем центроиды
+                processing.run("native:selectbylocation",
+                               {'INPUT': exploded, 'PREDICATE': 6, 'INTERSECT': buffered, 'METHOD': 0})
+                centroids = processing.run("native:centroids", {
+                    'INPUT': QgsProcessingFeatureSourceDefinition(exploded.id(), selectedFeaturesOnly=True),
+                    'ALL_PARTS': False, 'OUTPUT': 'memory:'})['OUTPUT']
+                snapped = processing.run("saga:snappointstolines",
+                                         {'INPUT': centroids, 'SNAP': streets, 'OUTPUT': 'TEMPORARY_OUTPUT',
+                                          'DISTANCE': 30})['OUTPUT']
+                snapped_l = QgsVectorLayer(snapped, 'snapped')
+                front = processing.run("qgis:distancetonearesthubpoints",
+                                       {'INPUT': centroids, 'HUBS': snapped_l, 'OUTPUT': 'memory:', 'FIELD': 'Name',
+                                        'UNIT': 0})['OUTPUT']
+                front.setName('Front')
+                QgsProject.instance().addMapLayer(front)
+                QgsProject.instance().removeMapLayer(exploded)
+
+                # удаляем лишние поля для земельных участков, оставляя наименьший HubDistance
+                for f in front.getFeatures():
+                    front.selectByExpression(" \"Name\" = '{}' ".format(f['Name']))
+                    front_side = front.selectedFeatures()[0]
+                    for sf in front.selectedFeatures():
+                        if sf['HubDist'] < front_side['HubDist']:
+                            front_side = sf
+                    front.deselect(front_side.id())
+                    with edit(front):
+                        for fd in front.selectedFeatures():
+                            front.deleteFeature(fd.id())
+
+                # посчитаем индекс протяженности фронта
+                front.dataProvider().addAttributes([QgsField('iFront', QVariant.Double)])
+                front.updateFields()
+                with edit(front):
+                    for f in front.getFeatures():
+                        f['iFront'] = f['HubDist']/f['Perimeter']
+                        front.updateFeature(f)
+
+                self.iface.messageBar().pushMessage("Success", "Geometries successfully calculated",
                                                     level=Qgis.Success)
 
             self.dockwidget.pushButton.clicked.connect(calculate)
