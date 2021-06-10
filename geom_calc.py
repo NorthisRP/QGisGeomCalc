@@ -348,7 +348,7 @@ class GeomCalculator:
                 front.updateFields()
                 with edit(front):
                     for f in front.getFeatures():
-                        f['iFront'] = f['HubDist']/f['Perimeter']
+                        f['iFront'] = f['HubDist']/f['width']
                         front.updateFeature(f)
 
                 self.iface.messageBar().pushMessage("Success", "Geometries successfully calculated",
